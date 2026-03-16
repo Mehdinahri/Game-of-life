@@ -34,7 +34,8 @@ git clone https://github.com/Mehdinahri/Game-of-life.git
 cd Game-of-life
 
 # Lancer tous les services
-docker compose up --build
+docker compose build --no-cache
+docker compose up
 ```
 
 L'application sera ensuite accessible sur : **http://localhost:3000**
