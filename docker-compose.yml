@@ -1,0 +1,215 @@
+# docker-compose.yml
+# Game of Life – Distributed
+# ─────────────────────────────────────────────────────────────────────────────
+# Structure attendue (docker-compose.yml à la racine du repo) :
+#
+#   game-of-life/          ← vous devez être ICI pour lancer docker compose
+#   ├── docker-compose.yml
+#   ├── shared/
+#   ├── backend/
+#   ├── worker/
+#   └── frontend/
+#
+# Démarrage : docker compose up --build
+# Frontend   → http://localhost:3000
+# Backend    → http://localhost:8000/docs
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Redis instances ────────────────────────────────────────────────────────
+  redis-1:
+    image: redis:7-alpine
+    container_name: gol-redis-1
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - gol-net
+    volumes:
+      - redis-1-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  redis-2:
+    image: redis:7-alpine
+    container_name: gol-redis-2
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    networks:
+      - gol-net
+    volumes:
+      - redis-2-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  redis-3:
+    image: redis:7-alpine
+    container_name: gol-redis-3
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    networks:
+      - gol-net
+    volumes:
+      - redis-3-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ── Backend – FastAPI ──────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .                        # racine = game-of-life/
+      dockerfile: backend/Dockerfile
+    image: gol-backend:latest
+    container_name: gol-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_1_HOST=redis-1
+      - REDIS_2_HOST=redis-2
+      - REDIS_3_HOST=redis-3
+      - REDIS_PORT=6379
+      - WS_THROTTLE_MS=50
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      redis-1:
+        condition: service_healthy
+      redis-2:
+        condition: service_healthy
+      redis-3:
+        condition: service_healthy
+    networks:
+      - gol-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Workers (un par zone / Redis) ─────────────────────────────────────────
+  worker-1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile.worker
+    image: gol-worker:latest
+    container_name: gol-worker-1
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis-1
+      - REDIS_1_HOST=redis-1
+      - REDIS_2_HOST=redis-2
+      - REDIS_3_HOST=redis-3
+      - REDIS_PORT=6379
+      - GRID_ZONE=zone-1
+      - TICK_INTERVAL=0.1
+      - SEED_DENSITY=0.3
+    depends_on:
+      redis-1:
+        condition: service_healthy
+      redis-2:
+        condition: service_healthy
+      redis-3:
+        condition: service_healthy
+    networks:
+      - gol-net
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile.worker
+    image: gol-worker:latest
+    container_name: gol-worker-2
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis-2
+      - REDIS_1_HOST=redis-1
+      - REDIS_2_HOST=redis-2
+      - REDIS_3_HOST=redis-3
+      - REDIS_PORT=6379
+      - GRID_ZONE=zone-2
+      - TICK_INTERVAL=0.1
+      - SEED_DENSITY=0.3
+    depends_on:
+      redis-1:
+        condition: service_healthy
+      redis-2:
+        condition: service_healthy
+      redis-3:
+        condition: service_healthy
+    networks:
+      - gol-net
+
+  worker-3:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile.worker
+    image: gol-worker:latest
+    container_name: gol-worker-3
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis-3
+      - REDIS_1_HOST=redis-1
+      - REDIS_2_HOST=redis-2
+      - REDIS_3_HOST=redis-3
+      - REDIS_PORT=6379
+      - GRID_ZONE=zone-3
+      - TICK_INTERVAL=0.1
+      - SEED_DENSITY=0.3
+    depends_on:
+      redis-1:
+        condition: service_healthy
+      redis-2:
+        condition: service_healthy
+      redis-3:
+        condition: service_healthy
+    networks:
+      - gol-net
+
+  # ── Frontend – React + Nginx ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        - REACT_APP_API_URL=http://localhost:3000/api
+        - REACT_APP_WS_URL=ws://localhost:3000/ws
+    image: gol-frontend:latest
+    container_name: gol-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - gol-net
+
+# ── Volumes persistants ────────────────────────────────────────────────────
+volumes:
+  redis-1-data:
+  redis-2-data:
+  redis-3-data:
+
+# ── Réseau interne ─────────────────────────────────────────────────────────
+networks:
+  gol-net:
+    driver: bridge
